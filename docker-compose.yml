@@ -1,4 +1,3 @@
-version: "3.7"
 services:
   backend:
     build:
@@ -20,3 +19,19 @@ services:
     container_name: ui
     ports:
       - 4173:4173
+
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j
+    restart: always
+    ports:
+      - 7474:7474
+      - 7687:7687
+    environment:
+      - NEO4J_AUTH=${NEO4J_USERNAME}/${NEO4J_PASSWORD}
+      - NEO4J_DATABASE=${NEO4J_DATABASE}
+    volumes:
+      - neo4j_data:/data
+
+volumes:
+  neo4j_data:
