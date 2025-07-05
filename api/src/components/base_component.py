@@ -1,19 +1,15 @@
 from abc import ABC, abstractmethod
-from typing import List, Union
+from typing import Any
 
 
 class BaseComponent(ABC):
-    """"""
+    """Base class for all components, allows flexible run signatures."""
 
     @abstractmethod
-    def run(
-        self,
-        input: Union[str, List[float]],
-    ) -> str:
-        """Comment"""
+    def run(self, *args, **kwargs) -> Any:
+        """Run the component with flexible arguments."""
+        pass
 
-    def run_async(
-        self,
-        input: Union[str, List[float]],
-    ) -> str:
-        """Comment"""
+    def run_async(self, *args, **kwargs) -> Any:
+        """Async run with flexible arguments."""
+        pass

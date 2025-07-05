@@ -1,5 +1,4 @@
 from typing import (
-    Callable,
     List,
 )
 
@@ -27,10 +26,10 @@ class OpenAIChat(BaseLLM):
     @retry(tries=3, delay=1)
     def generate(
         self,
-        messages: List[str],
+        messages: list[dict[str, str]],
     ) -> str:
         try:
-            completions = openai.ChatCompletion.create(
+            completions = openai.ChatCompletion.create(  # type: ignore
                 model=self.model,
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
@@ -38,10 +37,10 @@ class OpenAIChat(BaseLLM):
             )
             return completions.choices[0].message.content
         # catch context length / do not retry
-        except openai.error.InvalidRequestError as e:
+        except openai.error.InvalidRequestError as e:  # type: ignore
             return str(f"Error: {e}")
         # catch authorization errors / do not retry
-        except openai.error.AuthenticationError as e:
+        except openai.error.AuthenticationError as e:  # type: ignore
             return "Error: The provided OpenAI API key is invalid"
         except Exception as e:
             print(f"Retrying LLM call {e}")
@@ -49,11 +48,11 @@ class OpenAIChat(BaseLLM):
 
     async def generateStreaming(
         self,
-        messages: List[str],
-        onTokenCallback=Callable[[str], None],
-    ) -> str:
+        messages: list[dict[str, str]],
+        onTokenCallback=None,
+    ) -> List[str]:
         result = []
-        completions = openai.ChatCompletion.create(
+        completions = openai.ChatCompletion.create(  # type: ignore
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
@@ -66,7 +65,8 @@ class OpenAIChat(BaseLLM):
             delta = message["choices"][0]["delta"]
             if "content" in delta:
                 result.append(delta["content"])
-            await onTokenCallback(message)
+            if onTokenCallback:
+                await onTokenCallback(message)
         return result
 
     def num_tokens_from_string(self, string: str) -> int:

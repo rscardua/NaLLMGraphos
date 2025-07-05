@@ -1,6 +1,6 @@
 import re
 import os
-from typing import List
+from typing import List, Dict, Any
 
 from components.base_component import BaseComponent
 from llm.basellm import BaseLLM
@@ -144,7 +144,7 @@ class DataExtractor(BaseComponent):
         output = self.llm.generate(messages)
         return output
 
-    def run(self, data: str) -> List[str]:
+    def run(self, data: str) -> dict:
         system_message = generate_system_message()
         prompt_string = generate_prompt("")
         token_usage_per_prompt = self.llm.num_tokens_from_string(
@@ -176,7 +176,7 @@ class DataExtractorWithSchema(BaseComponent):
     def __init__(self, llm) -> None:
         self.llm = llm
 
-    def run(self, data: str, schema: str) -> List[str]:
+    def run(self, data: str, schema: str) -> dict:
         system_message = generate_system_message_with_schema()
         prompt_string = (
             generate_system_message_with_schema()

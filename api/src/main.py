@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fewshot_examples import get_fewshot_examples
 from llm.openai import OpenAIChat
+from llm.gemini import GeminiChat
 from pydantic import BaseModel
 
 
@@ -25,16 +26,19 @@ class Payload(BaseModel):
     question: str
     api_key: Optional[str]
     model_name: Optional[str]
+    llm_provider: Optional[str] = "openai"  # "openai" or "gemini"
 
 
 class ImportPayload(BaseModel):
     input: str
     neo4j_schema: Optional[str]
     api_key: Optional[str]
+    llm_provider: Optional[str] = "openai"  # "openai" or "gemini"
 
 
 class questionProposalPayload(BaseModel):
     api_key: Optional[str]
+    llm_provider: Optional[str] = "openai"  # "openai" or "gemini"
 
 
 # Maximum number of records used in the context
@@ -50,6 +54,43 @@ neo4j_connection = Neo4jDatabase(
 
 # Initialize LLM modules
 openai_api_key = os.environ.get("OPENAI_API_KEY", None)
+gemini_api_key = os.environ.get("GEMINI_API_KEY", None)
+
+
+def create_llm(provider: str, api_key: str, model_name: Optional[str] = None, max_tokens: int = 1000, temperature: float = 0.0):
+    """Factory function to create LLM instances based on provider."""
+    if provider.lower() == "gemini":
+        return GeminiChat(
+            gemini_api_key=api_key,
+            model_name=model_name or "gemini-pro",
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+    else:  # default to openai
+        return OpenAIChat(
+            openai_api_key=api_key,
+            model_name=model_name or "gpt-3.5-turbo",
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
+
+def validate_api_key(provider: str, api_key: Optional[str] = None) -> str:
+    """Validate API key based on provider."""
+    if provider.lower() == "gemini":
+        if not gemini_api_key and not api_key:
+            raise HTTPException(
+                status_code=422,
+                detail="Please set GEMINI_API_KEY environment variable or send it as api_key in the request body",
+            )
+        return gemini_api_key or api_key or ""
+    else:  # default to openai
+        if not openai_api_key and not api_key:
+            raise HTTPException(
+                status_code=422,
+                detail="Please set OPENAI_API_KEY environment variable or send it as api_key in the request body",
+            )
+        return openai_api_key or api_key or ""
 
 
 # Define FastAPI endpoint
@@ -70,18 +111,15 @@ app.add_middleware(
 
 @app.post("/questionProposalsForCurrentDb")
 async def questionProposalsForCurrentDb(payload: questionProposalPayload):
-    if not openai_api_key and not payload.api_key:
-        raise HTTPException(
-            status_code=422,
-            detail="Please set OPENAI_API_KEY environment variable or send it as api_key in the request body",
-        )
-    api_key = openai_api_key if openai_api_key else payload.api_key
+    provider = payload.llm_provider or "openai"
+    api_key = validate_api_key(provider, payload.api_key)
 
     questionProposalGenerator = QuestionProposalGenerator(
         database=neo4j_connection,
-        llm=OpenAIChat(
-            openai_api_key=api_key,
-            model_name="gpt-3.5-turbo-0613",
+        llm=create_llm(
+            provider=provider,
+            api_key=api_key,
+            model_name="gpt-3.5-turbo-0613" if provider == "openai" else "gemini-pro",
             max_tokens=512,
             temperature=0.8,
         ),
@@ -93,6 +131,16 @@ async def questionProposalsForCurrentDb(payload: questionProposalPayload):
 @app.get("/hasapikey")
 async def hasApiKey():
     return JSONResponse(content={"output": openai_api_key is not None})
+
+
+@app.get("/available_providers")
+async def available_providers():
+    """Return which LLM providers have API keys configured."""
+    providers = {
+        "openai": openai_api_key is not None,
+        "gemini": gemini_api_key is not None
+    }
+    return JSONResponse(content={"providers": providers})
 
 
 @app.websocket("/text2text")
@@ -121,21 +169,19 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            if not openai_api_key and not data.get("api_key"):
-                raise HTTPException(
-                    status_code=422,
-                    detail="Please set OPENAI_API_KEY environment variable or send it as api_key in the request body",
-                )
-            api_key = openai_api_key if openai_api_key else data.get("api_key")
+            provider = data.get("llm_provider", "openai")
+            api_key = validate_api_key(provider, data.get("api_key"))
 
-            default_llm = OpenAIChat(
-                openai_api_key=api_key,
-                model_name=data.get("model_name", "gpt-3.5-turbo-0613"),
+            default_llm = create_llm(
+                provider=provider,
+                api_key=api_key,
+                model_name=data.get("model_name", "gpt-3.5-turbo-0613" if provider == "openai" else "gemini-pro"),
             )
             summarize_results = SummarizeCypherResult(
-                llm=OpenAIChat(
-                    openai_api_key=api_key,
-                    model_name="gpt-3.5-turbo-0613",
+                llm=create_llm(
+                    provider=provider,
+                    api_key=api_key,
+                    model_name="gpt-3.5-turbo-0613" if provider == "openai" else "gemini-pro",
                     max_tokens=128,
                 )
             )
@@ -165,6 +211,28 @@ async def websocket_endpoint(websocket: WebSocket):
                         await sendErrorMessage("Could not generate Cypher statement")
                         continue
 
+                    # Check if we have valid query results or just error messages
+                    if results["generated_cypher"] is None:
+                        # No Cypher was generated, send the error message directly
+                        if results["output"] and isinstance(results["output"], list) and len(results["output"]) > 0:
+                            error_message = results["output"][0].get("message", "Could not generate Cypher statement")
+                            await sendErrorMessage(error_message)
+                        else:
+                            await sendErrorMessage("Could not generate Cypher statement")
+                        continue
+
+                    # Ensure we have valid query results (list of dicts) before summarizing
+                    query_results = results["output"]
+                    if not isinstance(query_results, list):
+                        await sendErrorMessage("Invalid query results format")
+                        continue
+                    
+                    # Filter out any error results and ensure we have actual data
+                    valid_results = [r for r in query_results if isinstance(r, dict) and "message" not in r]
+                    if not valid_results:
+                        await sendErrorMessage("No valid results found")
+                        continue
+
                     await websocket.send_json(
                         {
                             "type": "start",
@@ -172,7 +240,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     )
                     output = await summarize_results.run_async(
                         question,
-                        results["output"][:HARD_LIMIT_CONTEXT_RECORDS],
+                        valid_results[:HARD_LIMIT_CONTEXT_RECORDS],
                         callback=onToken,
                     )
                     chatHistory.append({"role": "system", "content": output})
@@ -195,18 +263,17 @@ async def root(payload: ImportPayload):
     """
     Takes an input and created a Cypher query
     """
-    if not openai_api_key and not payload.api_key:
-        raise HTTPException(
-            status_code=422,
-            detail="Please set OPENAI_API_KEY environment variable or send it as api_key in the request body",
-        )
-    api_key = openai_api_key if openai_api_key else payload.api_key
+    provider = payload.llm_provider or "openai"
+    api_key = validate_api_key(provider, payload.api_key)
 
     try:
         result = ""
 
-        llm = OpenAIChat(
-            openai_api_key=api_key, model_name="gpt-3.5-turbo-16k", max_tokens=4000
+        llm = create_llm(
+            provider=provider,
+            api_key=api_key,
+            model_name="gpt-3.5-turbo-16k" if provider == "openai" else "gemini-pro",
+            max_tokens=4000
         )
 
         if not payload.neo4j_schema:
@@ -233,22 +300,19 @@ async def root(payload: ImportPayload):
 class companyReportPayload(BaseModel):
     company: str
     api_key: Optional[str]
+    llm_provider: Optional[str] = "openai"  # "openai" or "gemini"
 
 
 # This endpoint is database specific and only works with the Demo database.
 @app.post("/companyReport")
 async def companyInformation(payload: companyReportPayload):
-    api_key = openai_api_key if openai_api_key else payload.api_key
-    if not openai_api_key and not payload.api_key:
-        raise HTTPException(
-            status_code=422,
-            detail="Please set OPENAI_API_KEY environment variable or send it as api_key in the request body",
-        )
-    api_key = openai_api_key if openai_api_key else payload.api_key
+    provider = payload.llm_provider or "openai"
+    api_key = validate_api_key(provider, payload.api_key)
 
-    llm = OpenAIChat(
-        openai_api_key=api_key,
-        model_name="gpt-3.5-turbo-16k-0613",
+    llm = create_llm(
+        provider=provider,
+        api_key=api_key,
+        model_name="gpt-3.5-turbo-16k-0613" if provider == "openai" else "gemini-pro",
         max_tokens=512,
     )
     print("Running company report for " + payload.company)

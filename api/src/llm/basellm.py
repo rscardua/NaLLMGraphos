@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import (
     Any,
     List,
+    Dict,
 )
 
 
@@ -13,24 +14,24 @@ class BaseLLM(ABC):
     """LLM wrapper should take in a prompt and return a string."""
 
     @abstractmethod
-    def generate(self, messages: List[str]) -> str:
-        """Comment"""
+    def generate(self, messages: List[Dict[str, str]]) -> str:
+        """Recebe uma lista de mensagens (dicionários) e retorna uma string."""
 
     @abstractmethod
     async def generateStreaming(
-        self, messages: List[str], onTokenCallback
+        self, messages: List[Dict[str, str]], onTokenCallback
     ) -> List[Any]:
-        """Comment"""
+        """Recebe uma lista de mensagens (dicionários) e retorna uma lista de tokens."""
 
     @abstractmethod
-    async def num_tokens_from_string(
+    def num_tokens_from_string(
         self,
         string: str,
-    ) -> str:
+    ) -> int:
         """Given a string returns the number of tokens the given string consists of"""
 
     @abstractmethod
-    async def max_allowed_token_length(
+    def max_allowed_token_length(
         self,
     ) -> int:
         """Returns the maximum number of tokens the LLM can handle"""

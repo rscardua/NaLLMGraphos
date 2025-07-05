@@ -4,6 +4,14 @@ Welcome to the NaLLM project repository, where we are exploring and demonstratin
 
 This repository houses both backend and frontend code, designed and organized to facilitate an intuitive journey through our project.
 
+## LLM Providers Supported
+
+This project now supports multiple LLM providers:
+- **OpenAI** (GPT-3.5, GPT-4)
+- **Google Gemini** (Gemini Pro)
+
+See [GEMINI_INTEGRATION.md](GEMINI_INTEGRATION.md) for detailed configuration instructions.
+
 # Blog posts
 
 During this project we're also writing blog posts where we deep dive into our learnings and explorations.
